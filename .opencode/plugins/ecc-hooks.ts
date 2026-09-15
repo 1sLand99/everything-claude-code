@@ -523,6 +523,7 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
         env.PRIMARY_LANGUAGE = detected[0]
       }
 
+      // OpenCode reads the supplied output object and ignores callback return values.
       output.env = { ...output.env, ...env }
     },
 
@@ -561,11 +562,17 @@ export const ECCHooksPlugin: ECCHooksPluginFn = async ({
         contextBlock.push("")
       }
 
-      output.context = [
-        ...output.context,
+      const eccContext = [
         contextBlock.join("\n"),
         "Focus on preserving: 1) Current task status and progress, 2) Key decisions made, 3) Files created/modified, 4) Remaining work items, 5) Any security concerns flagged. Discard: verbose tool outputs, intermediate exploration, redundant file listings.",
       ]
+
+      // OpenCode requires output assignment and skips context when a prompt is set.
+      if (output.prompt !== undefined) {
+        output.prompt = [output.prompt, ...eccContext].join("\n\n")
+      } else {
+        output.context = [...output.context, ...eccContext]
+      }
     },
 
     /**

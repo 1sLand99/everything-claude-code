@@ -179,12 +179,14 @@ async function main() {
           const $ = createFailingShell()
           const hooks = await ECCHooksPlugin({ client, $, directory: projectDir })
 
-          const output = { env: { EXISTING_ENV: "preserved" } }
+          const existingEnv = Object.freeze({ EXISTING_ENV: "preserved" })
+          const output = { env: existingEnv }
           await hooks["shell.env"]({ cwd: projectDir }, output)
           const { env } = output
 
           assert.deepStrictEqual($.calls, [], `Unexpected shell probes: ${$.calls.join(", ")}`)
           assert.strictEqual(env.EXISTING_ENV, "preserved")
+          assert.notStrictEqual(env, existingEnv)
           assert.strictEqual(env.PROJECT_ROOT, projectDir)
           assert.strictEqual(env.PACKAGE_MANAGER, "pnpm")
           assert.strictEqual(env.DETECTED_LANGUAGES, "typescript,python")
@@ -266,18 +268,38 @@ async function main() {
         const client = createClient()
         const $ = createFailingShell()
         const hooks = await ECCHooksPlugin({ client, $, directory: projectDir })
-        const output = { context: ["Existing plugin context"] }
+        const existingContext = Object.freeze(["Existing plugin context"])
+        const output = { context: existingContext }
 
         await hooks["experimental.session.compacting"]({ sessionID: "session-1" }, output)
 
         assert.strictEqual(output.context[0], "Existing plugin context")
+        assert.notStrictEqual(output.context, existingContext)
         const prompt = output.prompt ?? ["Default compaction prompt", ...output.context].join("\n\n")
         assert.ok(prompt.includes("Default compaction prompt"))
         assert.ok(prompt.includes("# ECC Context"))
         assert.ok(prompt.includes("Current task status and progress"))
-        const customOutput = { context: [], prompt: "Another plugin's custom prompt" }
-        await hooks["experimental.session.compacting"]({ sessionID: "session-1" }, customOutput)
-        assert.strictEqual(customOutput.prompt, "Another plugin's custom prompt")
+        assert.deepStrictEqual($.calls, [])
+      }),
+    ],
+    [
+      "compacting appends ECC guidance to custom prompts, including an empty prompt",
+      async () => withTempProject([], async (projectDir) => {
+        const client = createClient()
+        const $ = createFailingShell()
+        const hooks = await ECCHooksPlugin({ client, $, directory: projectDir })
+
+        for (const customPrompt of ["Another plugin's custom prompt", ""]) {
+          const existingContext = Object.freeze(["Existing plugin context"])
+          const output = { context: existingContext, prompt: customPrompt }
+          await hooks["experimental.session.compacting"]({ sessionID: "session-1" }, output)
+
+          const prompt = output.prompt ?? ["Default compaction prompt", ...output.context].join("\n\n")
+          assert.ok(prompt.startsWith(`${customPrompt}\n\n`))
+          assert.ok(prompt.includes("# ECC Context"))
+          assert.ok(prompt.includes("Current task status and progress"))
+          assert.strictEqual(output.context, existingContext)
+        }
         assert.deepStrictEqual($.calls, [])
       }),
     ],
