@@ -154,10 +154,10 @@ for (const name of SHARED_FILES) {
       const refreshedOperation = readInstallState(fixture.statePath).operations.find(operation => (
         operation.destinationPath === fixture.destination(name) && operation.ownership === 'managed'
       ));
-      if (refreshedOperation) {
-        assert.equal(refreshedOperation.contentSha256, previousOperation.contentSha256,
-          'Repair must retain the previous digest for configuration it did not write');
-      }
+      assert.ok(refreshedOperation,
+        'Repair must retain the previous ledger entry for configuration it did not write');
+      assert.equal(refreshedOperation.contentSha256, previousOperation.contentSha256,
+        'Repair must retain the previous digest for configuration it did not write');
       lifecycleResult(fixture.uninstall());
       assertPreserved(fixture, name, content);
     });
@@ -222,10 +222,10 @@ for (const name of SHARED_FILES) {
     const checkpointOperation = readInstallState(fixture.statePath).operations.find(operation => (
       operation.destinationPath === destination && operation.ownership === 'managed'
     ));
-    if (checkpointOperation) {
-      assert.equal(checkpointOperation.contentSha256, previousOperation.contentSha256,
-        'A failure checkpoint must retain the old digest, never adopt the user edit');
-    }
+    assert.ok(checkpointOperation,
+      'A failure checkpoint must retain the previous ledger entry');
+    assert.equal(checkpointOperation.contentSha256, previousOperation.contentSha256,
+      'A failure checkpoint must retain the old digest, never adopt the user edit');
     lifecycleResult(fixture.uninstall());
     assertPreserved(fixture, name, content);
   });
