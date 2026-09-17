@@ -328,26 +328,27 @@ function runHermeticPythonPrePush({
   const initialized = spawnSync('git', ['init', '--quiet'], { cwd: projectDir });
   assert.strictEqual(initialized.status, 0, initialized.stderr?.toString());
 
+  const venvDir = venvName === null ? null : path.join(tempDir, venvName);
+  const venvPython = venvDir === null ? null : path.join(venvDir, 'bin', 'python');
+  if (venvPython !== null) {
+    writeExecutable(venvPython, `#!/bin/sh\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
+  }
+
+  const overrideStub = overrideVersionLine === null
+    ? null
+    : path.join(tempDir, 'bin', 'fake-pytest');
+  if (overrideStub !== null) {
+    writeExecutable(overrideStub, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s\\n' '${overrideVersionLine}'; exit 0; fi\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
+  }
+
+  const override = overrideStub === null ? pytestCmd : toBashPath(overrideStub);
   const env = {
     ECC_SKIP_GIT_HOOKS: '0',
     ECC_SKIP_PREPUSH: '0',
     MSYS_NO_PATHCONV: '1',
+    ...(venvDir === null ? {} : { VIRTUAL_ENV: toBashPath(venvDir) }),
+    ...(override === null ? {} : { ECC_PYTEST_CMD: override }),
   };
-
-  let venvPython = null;
-  if (venvName) {
-    venvPython = path.join(tempDir, venvName, 'bin', 'python');
-    writeExecutable(venvPython, `#!/bin/sh\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
-    env.VIRTUAL_ENV = toBashPath(path.join(tempDir, venvName));
-  }
-
-  if (overrideVersionLine !== null) {
-    const stub = path.join(tempDir, 'bin', 'fake-pytest');
-    writeExecutable(stub, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s\\n' '${overrideVersionLine}'; exit 0; fi\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
-    env.ECC_PYTEST_CMD = toBashPath(stub);
-  } else if (pytestCmd !== null) {
-    env.ECC_PYTEST_CMD = pytestCmd;
-  }
 
   const result = runBash(prePushHook, {
     env,
