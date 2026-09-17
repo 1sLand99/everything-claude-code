@@ -117,15 +117,60 @@ if [[ -f "go.mod" ]] && command -v go >/dev/null 2>&1; then
   go test ./... || fail "go test failed"
 fi
 
-if [[ -f "pyproject.toml" || -f "requirements.txt" ]]; then
+# Resolve how this project runs pytest.
+#
+# Looking only for `pytest` on PATH meant the hook skipped every project that keeps
+# its tools in a virtualenv -- which is most of them -- and reported "pytest is not
+# installed" while sitting next to a .venv with pytest in it. A gate that silently
+# declines to gate is worse than no gate, because the skip line reads like a pass.
+#
+# Echoes the command it will run, so the reason for a skip is always visible.
+resolve_pytest() {
+  if [[ -n "${ECC_PYTEST_CMD:-}" ]]; then
+    echo "$ECC_PYTEST_CMD"
+    return 0
+  fi
+  local venv
+  for venv in "${VIRTUAL_ENV:-}" .venv venv env; do
+    if [[ -n "$venv" && -x "$venv/bin/python" ]]; then
+      if "$venv/bin/python" -c "import pytest" >/dev/null 2>&1; then
+        echo "$venv/bin/python -m pytest"
+        return 0
+      fi
+    fi
+  done
+  if [[ -f "uv.lock" ]] && command -v uv >/dev/null 2>&1; then
+    if uv run --no-sync python -c "import pytest" >/dev/null 2>&1; then
+      echo "uv run --no-sync pytest"
+      return 0
+    fi
+  fi
+  if [[ -f "poetry.lock" ]] && command -v poetry >/dev/null 2>&1; then
+    if poetry run python -c "import pytest" >/dev/null 2>&1; then
+      echo "poetry run pytest"
+      return 0
+    fi
+  fi
   if command -v pytest >/dev/null 2>&1; then
+    echo "pytest"
+    return 0
+  fi
+  return 1
+}
+
+if [[ -f "pyproject.toml" || -f "requirements.txt" ]]; then
+  if pytest_cmd="$(resolve_pytest)"; then
     ran_any_check=1
-    log "Python project detected. Running: pytest -q"
-    pytest -q || fail "pytest failed"
+    log "Python project detected. Running: $pytest_cmd -q"
+    # Unquoted on purpose: the resolver returns a command with arguments.
+    # shellcheck disable=SC2086
+    $pytest_cmd -q || fail "pytest failed"
   else
-    log "Python project detected but pytest is not installed. Skipping."
+    log "Python project detected but no pytest found (checked \$VIRTUAL_ENV, .venv,"
+    log "  venv, env, uv, poetry, PATH). Set ECC_PYTEST_CMD to point at it."
   fi
 fi
+
 
 if [[ "$ran_any_check" -eq 0 ]]; then
   log "No supported checks found in this repository. Skipping."
