@@ -319,6 +319,7 @@ function runHermeticPythonPrePush({
   venvName = null,
   venvExit = 0,
   trackVenv = false,
+  trackedVenvBasename = 'python',
   trackedSymlinkVenv = false,
   pytestCmd = null,
   overrideStub = false,
@@ -340,9 +341,11 @@ function runHermeticPythonPrePush({
   // A tracked venv has to live inside the repository to be trackable at all, and is
   // found by directory-name discovery rather than by VIRTUAL_ENV.
   const venvDir = venvName === null ? null : path.join(trackVenv ? projectDir : tempDir, venvName);
-  const venvPython = venvDir === null ? null : path.join(venvDir, 'bin', 'python');
+  const venvPython = venvDir === null
+    ? null
+    : path.join(venvDir, 'bin', trackVenv ? trackedVenvBasename : 'python');
   if (venvPython !== null) {
-    writeExecutable(venvPython, `#!/bin/sh\n${record}\nif [ "$1" = "-c" ]; then exit 0; fi\nexit ${venvExit}\n`);
+    writeExecutable(venvPython, `#!/bin/sh\n${record}\ncase " $* " in *" -c "*) exit 0 ;; esac\nexit ${venvExit}\n`);
     if (trackVenv) {
       // Staged, not committed: `git ls-files` reads the index, so this is enough to
       // make the file repository-controlled without needing a committer identity.
@@ -414,7 +417,7 @@ if (
     const python = toBashPath(venvPython);
     assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.deepStrictEqual(calls, [
-      `${python}|-c import pytest`,
+      `${python}|-I -c import pytest`,
       `${python}|-m pytest -q`,
     ], JSON.stringify({ calls, python, stdout: result.stdout, stderr: result.stderr }, null, 2));
   })
@@ -432,6 +435,26 @@ if (
 )
   passed++;
 else failed++;
+
+// A case-folded spelling, because macOS resolves `$venv/bin/python` to a committed
+// `Python` while git matches index pathspecs case-sensitively. Skipped where the
+// filesystem is case-sensitive and the two names cannot collide.
+if (fs.existsSync(__filename.toUpperCase()) || fs.existsSync(__filename.toLowerCase())) {
+  if (
+    test('pre-push refuses a tracked interpreter committed under a folded case', () => {
+      const { result, calls } = runHermeticPythonPrePush({
+        venvName: '.venv',
+        trackVenv: true,
+        trackedVenvBasename: 'Python',
+      });
+      assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.deepStrictEqual(calls, [], JSON.stringify(calls));
+      assert.match(result.stdout, /the repository ships it/);
+    })
+  )
+    passed++;
+  else failed++;
+}
 
 if (
   test('pre-push refuses a tracked interpreter reached through a committed symlink', () => {
