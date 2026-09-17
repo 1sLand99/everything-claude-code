@@ -136,6 +136,11 @@ PYTEST_CMD=()
 # plenty of programs take it and exit 0 -- so the output has to name pytest. The
 # version is captured rather than piped: under `set -o pipefail` a `| grep -q` can
 # report the SIGPIPE of the program it just matched.
+#
+# Only ever called on a command this script composed itself. Probing an arbitrary
+# operator-supplied command is not safe: a wrapper that ignores `--version` and
+# execs pytest runs the entire suite during the probe, and is then rejected for
+# not having printed a version.
 is_pytest() {
   local version
   version="$("$@" --version 2>&1)" || return 1
@@ -144,17 +149,15 @@ is_pytest() {
 
 resolve_pytest() {
   if [[ -n "${ECC_PYTEST_CMD:-}" ]]; then
-    # Word-split, so the override names a command on PATH or an interpreter whose
-    # path has no spaces; a venv with spaces in its name is found by the loop below.
+    # Taken as given. This is a deliberate override, and the hook cannot inspect it
+    # without running it -- a wrapper script may ignore `--version` and run the
+    # suite, so probing costs a duplicate test run and then blocks the push anyway.
+    # Pointing this at something that is not pytest turns the gate off, and that is
+    # the operator's call to make, not a misconfiguration for the hook to second
+    # guess. Word-split, so the command names something on PATH or an interpreter
+    # whose path has no spaces; a venv with spaces is found by the loop below.
     read -r -a PYTEST_CMD <<<"$ECC_PYTEST_CMD" || true
-    # Checked like every other candidate, and fatally rather than by falling
-    # through: an operator who set this asked for that command, and quietly running
-    # a different one would hide the misconfiguration. `ECC_PYTEST_CMD=true` would
-    # otherwise run `true -q`, pass, and report a Python project verified by
-    # nothing -- the same silent gate this resolver exists to remove.
-    if [[ ${#PYTEST_CMD[@]} -eq 0 ]] || ! is_pytest "${PYTEST_CMD[@]}"; then
-      fail "ECC_PYTEST_CMD is set to '$ECC_PYTEST_CMD', which does not run pytest"
-    fi
+    [[ ${#PYTEST_CMD[@]} -gt 0 ]] || fail "ECC_PYTEST_CMD is set but empty"
     return 0
   fi
   local venv
@@ -178,8 +181,8 @@ resolve_pytest() {
       return 0
     fi
   fi
-  # `command -v` proves only that a file of that name exists on PATH, which is why
-  # this candidate is confirmed too before it is accepted.
+  # `command -v` proves only that a file of that name exists on PATH. This one the
+  # script composed itself, so confirming it costs a harmless `pytest --version`.
   if command -v pytest >/dev/null 2>&1 && is_pytest pytest; then
     PYTEST_CMD=(pytest)
     return 0
@@ -192,7 +195,25 @@ if [[ -f "pyproject.toml" || -f "requirements.txt" ]]; then
   if resolve_pytest; then
     ran_any_check=1
     log "Python project detected. Running: ${PYTEST_CMD[*]} -q"
-    "${PYTEST_CMD[@]}" -q || fail "pytest failed"
+    pytest_status=0
+    "${PYTEST_CMD[@]}" -q || pytest_status=$?
+    case "$pytest_status" in
+      0) ;;
+      # pytest reserves 5 for NO_TESTS_COLLECTED, which is not a red suite. A
+      # pyproject.toml that only configures ruff or black is still a Python project
+      # by this hook's test, and blocking those pushes would make the gate something
+      # people switch off. Never silent, though: a bad rootdir, testpaths or a
+      # conftest that fails to import also collects nothing, and swallowing that is
+      # the same skip-reads-like-a-pass hole this resolver exists to close.
+      5)
+        log "pytest collected no tests (exit 5). Not gating this push."
+        log "  If this repository is supposed to have tests, that is the bug:"
+        log "  check rootdir, testpaths, and conftest.py import errors."
+        ;;
+      # The code is in the message because 1 (tests failed) and 4 (usage error)
+      # need different responses, and "pytest failed" alone cannot tell them apart.
+      *) fail "pytest failed (exit $pytest_status)" ;;
+    esac
   else
     log "Python project detected but no pytest found (checked \$VIRTUAL_ENV, .venv,"
     log "  venv, env, uv, poetry, PATH). Set ECC_PYTEST_CMD to point at it."

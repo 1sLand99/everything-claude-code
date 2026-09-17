@@ -317,8 +317,10 @@ function writeExecutable(filePath, body) {
 // is actually about.
 function runHermeticPythonPrePush({
   venvName = null,
+  venvExit = 0,
   pytestCmd = null,
-  overrideVersionLine = null,
+  overrideStub = false,
+  pathPytestVersionLine = null,
 } = {}) {
   const tempDir = createTempDir('codex-pre-push-py-');
   const projectDir = path.join(tempDir, 'project');
@@ -328,26 +330,48 @@ function runHermeticPythonPrePush({
   const initialized = spawnSync('git', ['init', '--quiet'], { cwd: projectDir });
   assert.strictEqual(initialized.status, 0, initialized.stderr?.toString());
 
+  // Every stub records the argv it was handed. That record is the assertion: it is
+  // how a test tells a preserved path from a split one, and a command that was run
+  // once from one the hook probed first.
+  const record = `printf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"`;
+
   const venvDir = venvName === null ? null : path.join(tempDir, venvName);
   const venvPython = venvDir === null ? null : path.join(venvDir, 'bin', 'python');
   if (venvPython !== null) {
-    writeExecutable(venvPython, `#!/bin/sh\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
+    writeExecutable(venvPython, `#!/bin/sh\n${record}\nif [ "$1" = "-c" ]; then exit 0; fi\nexit ${venvExit}\n`);
   }
 
-  const overrideStub = overrideVersionLine === null
-    ? null
-    : path.join(tempDir, 'bin', 'fake-pytest');
-  if (overrideStub !== null) {
-    writeExecutable(overrideStub, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s\\n' '${overrideVersionLine}'; exit 0; fi\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
+  // Deliberately does NOT special-case --version: an operator's wrapper would not
+  // either, and the recorded calls are what prove the hook never probed it.
+  const overrideStubPath = overrideStub ? path.join(tempDir, 'bin', 'wrapper') : null;
+  if (overrideStubPath !== null) {
+    writeExecutable(overrideStubPath, `#!/bin/sh\n${record}\nexit 0\n`);
   }
 
-  const override = overrideStub === null ? pytestCmd : toBashPath(overrideStub);
+  const pathBin = pathPytestVersionLine === null ? null : path.join(tempDir, 'pathbin');
+  if (pathBin !== null) {
+    writeExecutable(
+      path.join(pathBin, 'pytest'),
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s\\n' '${pathPytestVersionLine}'; exit 0; fi\n${record}\nexit 0\n`,
+    );
+  }
+
+  const override = overrideStubPath === null ? pytestCmd : toBashPath(overrideStubPath);
   const env = {
+    // The hook reads both of these from the ambient environment. Inherited, a
+    // developer running this suite inside an activated virtualenv, or with an
+    // ECC_PYTEST_CMD exported, would resolve a pytest the fixture never created,
+    // and these tests would pass or fail depending on whose shell ran them.
+    VIRTUAL_ENV: '',
+    ECC_PYTEST_CMD: '',
     ECC_SKIP_GIT_HOOKS: '0',
     ECC_SKIP_PREPUSH: '0',
     MSYS_NO_PATHCONV: '1',
     ...(venvDir === null ? {} : { VIRTUAL_ENV: toBashPath(venvDir) }),
     ...(override === null ? {} : { ECC_PYTEST_CMD: override }),
+    ...(pathBin === null
+      ? {}
+      : { PATH: `${toBashPath(pathBin)}${path.delimiter}${process.env.PATH}` }),
   };
 
   const result = runBash(prePushHook, {
@@ -359,7 +383,7 @@ function runHermeticPythonPrePush({
     ? fs.readFileSync(callsPath, 'utf8').trim().split(/\r?\n/).filter(Boolean)
     : [];
   cleanup(tempDir);
-  return { result, calls, venvPython };
+  return { result, calls, venvPython, overrideStubPath };
 }
 
 if (
@@ -377,11 +401,10 @@ if (
 else failed++;
 
 if (
-  test('pre-push rejects an ECC_PYTEST_CMD that does not run pytest', () => {
-    const { result, calls } = runHermeticPythonPrePush({ pytestCmd: 'true' });
+  test('pre-push blocks the push when the resolved pytest fails', () => {
+    const { result } = runHermeticPythonPrePush({ venvName: 'venv-red', venvExit: 1 });
     assert.notStrictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.match(result.stderr, /ECC_PYTEST_CMD is set to 'true', which does not run pytest/);
-    assert.deepStrictEqual(calls, []);
+    assert.match(result.stderr, /pytest failed \(exit 1\)/);
     assert.doesNotMatch(result.stdout, /Verification checks passed/);
   })
 )
@@ -389,8 +412,52 @@ if (
 else failed++;
 
 if (
-  test('pre-push runs an ECC_PYTEST_CMD override that identifies itself as pytest', () => {
-    const { result, calls } = runHermeticPythonPrePush({ overrideVersionLine: 'pytest 8.0.0' });
+  test('pre-push does not block when pytest collected no tests (exit 5)', () => {
+    const { result } = runHermeticPythonPrePush({ venvName: 'venv-empty', venvExit: 5 });
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /collected no tests \(exit 5\)/);
+    assert.match(result.stdout, /rootdir, testpaths, and conftest\.py/);
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push runs an ECC_PYTEST_CMD override exactly once, without probing it', () => {
+    const { result, calls, overrideStubPath } = runHermeticPythonPrePush({ overrideStub: true });
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.deepStrictEqual(calls, [`${toBashPath(overrideStubPath)}|-q`], JSON.stringify(calls));
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push fails closed when ECC_PYTEST_CMD is set to whitespace', () => {
+    const { result } = runHermeticPythonPrePush({ pytestCmd: '   ' });
+    assert.notStrictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /ECC_PYTEST_CMD is set but empty/);
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push rejects a PATH pytest that does not identify itself as pytest', () => {
+    const { result, calls } = runHermeticPythonPrePush({
+      pathPytestVersionLine: 'true (GNU coreutils) 9.0',
+    });
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /no pytest found/);
+    assert.deepStrictEqual(calls, []);
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push accepts a PATH pytest that reports a pytest version', () => {
+    const { result, calls } = runHermeticPythonPrePush({ pathPytestVersionLine: 'pytest 8.0.0' });
     assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.strictEqual(calls.length, 1, JSON.stringify(calls));
     assert.match(calls[0], /\|-q$/);
@@ -398,6 +465,7 @@ if (
 )
   passed++;
 else failed++;
+
 
 if (
   test('check-plugin-cache fails when the installed cache is missing manifest-referenced files', () => {
