@@ -319,6 +319,7 @@ function runHermeticPythonPrePush({
   venvName = null,
   venvExit = 0,
   trackVenv = false,
+  trackedSymlinkVenv = false,
   pytestCmd = null,
   overrideStub = false,
   pathPytestVersionLine = null,
@@ -348,6 +349,16 @@ function runHermeticPythonPrePush({
       const added = spawnSync('git', ['add', '-f', '--', venvPython], { cwd: projectDir });
       assert.strictEqual(added.status, 0, added.stderr?.toString());
     }
+  }
+
+  // The shape that defeats a naive `git ls-files -- .venv/bin/python` check: the
+  // repository commits `.venv` as a symlink to its own root plus a tracked
+  // `bin/python`, so git is asked about a path it has never indexed.
+  if (trackedSymlinkVenv) {
+    writeExecutable(path.join(projectDir, 'bin', 'python'), `#!/bin/sh\n${record}\nexit 0\n`);
+    fs.symlinkSync('.', path.join(projectDir, '.venv'));
+    const added = spawnSync('git', ['add', '-f', '--', 'bin/python', '.venv'], { cwd: projectDir });
+    assert.strictEqual(added.status, 0, added.stderr?.toString());
   }
 
   // Deliberately does NOT special-case --version: an operator's wrapper would not
@@ -416,7 +427,18 @@ if (
     const { result, calls } = runHermeticPythonPrePush({ venvName: '.venv', trackVenv: true });
     assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.deepStrictEqual(calls, [], JSON.stringify(calls));
-    assert.match(result.stdout, /it is tracked in this repository/);
+    assert.match(result.stdout, /the repository ships it/);
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push refuses a tracked interpreter reached through a committed symlink', () => {
+    const { result, calls } = runHermeticPythonPrePush({ trackedSymlinkVenv: true });
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.deepStrictEqual(calls, [], JSON.stringify(calls));
+    assert.match(result.stdout, /the repository ships it/);
   })
 )
   passed++;

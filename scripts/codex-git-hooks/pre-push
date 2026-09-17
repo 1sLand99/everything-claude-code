@@ -147,6 +147,31 @@ is_pytest() {
   grep -qiE 'pytest[[:space:]]+(version[[:space:]]+)?[0-9]' <<<"$version"
 }
 
+# Does the repository itself ship this interpreter?
+#
+# A virtualenv is never committed -- it is platform-specific binaries, and every
+# Python project gitignores it. One that IS tracked is the repository handing this
+# hook an executable and asking it to run. The hook is installed globally, so
+# cloning a hostile repository and pushing it to your own fork would be enough,
+# and on a machine with no pytest on PATH this arm is the only thing that would
+# run at all. A developer's own venv is untracked, so nothing legitimate is lost.
+#
+# The path is resolved through symlinks before git is asked, because `git ls-files`
+# reports paths as indexed and does not follow links. A repository that commits
+# `.venv` as a symlink to `.` next to a tracked `bin/python` would otherwise be
+# queried for `.venv/bin/python`, a path git has never heard of, and the answer
+# would be "untracked". Measured: that shape ran the planted binary twice.
+repo_ships_interpreter() {
+  local bindir real top
+  bindir="$(cd -P -- "$1" 2>/dev/null && pwd -P)" || return 1
+  [[ -n "$bindir" ]] || return 1
+  real="$bindir/python"
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  top="$(cd -P -- "$top" 2>/dev/null && pwd -P)" || return 1
+  [[ -n "$top" && "$real" == "$top/"* ]] || return 1
+  git ls-files --error-unmatch -- "${real#"$top"/}" >/dev/null 2>&1
+}
+
 resolve_pytest() {
   # `${VAR+set}` rather than `-n "${VAR:-}"`, so that a variable set to nothing is
   # still an override: `ECC_PYTEST_CMD=` and `ECC_PYTEST_CMD="   "` now behave
@@ -175,16 +200,8 @@ resolve_pytest() {
   local venv
   for venv in "${VIRTUAL_ENV:-}" .venv venv env; do
     if [[ -n "$venv" && -x "$venv/bin/python" ]]; then
-      # A virtualenv is never committed -- it is platform-specific binaries, and
-      # every Python project gitignores it. One that IS tracked is the repository
-      # handing this hook an executable and asking it to run. The hook is installed
-      # globally, so cloning a hostile repository and pushing it to your own fork
-      # would be enough, and on a machine with no pytest on PATH this arm is the
-      # only thing that would run at all. Skipping costs nothing legitimate,
-      # because a developer's own venv is untracked -- and it says why rather than
-      # going quiet about it.
-      if git ls-files --error-unmatch -- "$venv/bin/python" >/dev/null 2>&1; then
-        log "Ignoring $venv/bin/python: it is tracked in this repository."
+      if repo_ships_interpreter "$venv/bin"; then
+        log "Ignoring $venv/bin/python: the repository ships it."
         log "  A committed virtualenv is an executable the repository controls, and"
         log "  this hook runs on every push in every repository."
         continue
