@@ -318,6 +318,7 @@ function writeExecutable(filePath, body) {
 function runHermeticPythonPrePush({
   venvName = null,
   venvExit = 0,
+  trackVenv = false,
   pytestCmd = null,
   overrideStub = false,
   pathPytestVersionLine = null,
@@ -335,10 +336,18 @@ function runHermeticPythonPrePush({
   // once from one the hook probed first.
   const record = `printf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"`;
 
-  const venvDir = venvName === null ? null : path.join(tempDir, venvName);
+  // A tracked venv has to live inside the repository to be trackable at all, and is
+  // found by directory-name discovery rather than by VIRTUAL_ENV.
+  const venvDir = venvName === null ? null : path.join(trackVenv ? projectDir : tempDir, venvName);
   const venvPython = venvDir === null ? null : path.join(venvDir, 'bin', 'python');
   if (venvPython !== null) {
     writeExecutable(venvPython, `#!/bin/sh\n${record}\nif [ "$1" = "-c" ]; then exit 0; fi\nexit ${venvExit}\n`);
+    if (trackVenv) {
+      // Staged, not committed: `git ls-files` reads the index, so this is enough to
+      // make the file repository-controlled without needing a committer identity.
+      const added = spawnSync('git', ['add', '-f', '--', venvPython], { cwd: projectDir });
+      assert.strictEqual(added.status, 0, added.stderr?.toString());
+    }
   }
 
   // Deliberately does NOT special-case --version: an operator's wrapper would not
@@ -371,7 +380,7 @@ function runHermeticPythonPrePush({
     ECC_SKIP_GIT_HOOKS: '0',
     ECC_SKIP_PREPUSH: '0',
     MSYS_NO_PATHCONV: '1',
-    ...(venvDir === null ? {} : { VIRTUAL_ENV: toBashPath(venvDir) }),
+    ...(venvDir === null || trackVenv ? {} : { VIRTUAL_ENV: toBashPath(venvDir) }),
     ...(override === null ? {} : { ECC_PYTEST_CMD: override }),
   };
 
@@ -397,6 +406,17 @@ if (
       `${python}|-c import pytest`,
       `${python}|-m pytest -q`,
     ], JSON.stringify({ calls, python, stdout: result.stdout, stderr: result.stderr }, null, 2));
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push refuses to run a virtualenv python that the repository tracks', () => {
+    const { result, calls } = runHermeticPythonPrePush({ venvName: '.venv', trackVenv: true });
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.deepStrictEqual(calls, [], JSON.stringify(calls));
+    assert.match(result.stdout, /it is tracked in this repository/);
   })
 )
   passed++;
