@@ -168,7 +168,8 @@ resolve_pytest() {
     # guess. Word-split, so the command names something on PATH or an interpreter
     # whose path has no spaces; a venv with spaces is found by the loop below.
     read -r -a PYTEST_CMD <<<"$ECC_PYTEST_CMD" || true
-    [[ ${#PYTEST_CMD[@]} -gt 0 ]] || fail "ECC_PYTEST_CMD is set but names no command"
+    [[ ${#PYTEST_CMD[@]} -gt 0 ]] || fail "ECC_PYTEST_CMD is set but names no command.\
+ Point it at your test runner, or unset it to fall back to discovery."
     return 0
   fi
   local venv
