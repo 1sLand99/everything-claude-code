@@ -357,26 +357,28 @@ function runHermeticPythonPrePush({
   }
 
   const override = overrideStubPath === null ? pytestCmd : toBashPath(overrideStubPath);
+  // Built from nothing rather than from process.env. The hook reads VIRTUAL_ENV and
+  // ECC_PYTEST_CMD from the ambient environment, so a developer running this suite
+  // inside an activated virtualenv, or with ECC_PYTEST_CMD exported, would resolve a
+  // pytest the fixture never created. Omitted, not blanked: now that a variable set
+  // to nothing is itself an override, blanking it here would make every one of these
+  // tests take that branch.
   const env = {
-    // The hook reads both of these from the ambient environment. Inherited, a
-    // developer running this suite inside an activated virtualenv, or with an
-    // ECC_PYTEST_CMD exported, would resolve a pytest the fixture never created,
-    // and these tests would pass or fail depending on whose shell ran them.
-    VIRTUAL_ENV: '',
-    ECC_PYTEST_CMD: '',
+    PATH: pathBin === null
+      ? process.env.PATH
+      : `${toBashPath(pathBin)}${path.delimiter}${process.env.PATH}`,
+    HOME: process.env.HOME ?? '',
     ECC_SKIP_GIT_HOOKS: '0',
     ECC_SKIP_PREPUSH: '0',
     MSYS_NO_PATHCONV: '1',
     ...(venvDir === null ? {} : { VIRTUAL_ENV: toBashPath(venvDir) }),
     ...(override === null ? {} : { ECC_PYTEST_CMD: override }),
-    ...(pathBin === null
-      ? {}
-      : { PATH: `${toBashPath(pathBin)}${path.delimiter}${process.env.PATH}` }),
   };
 
   const result = runBash(prePushHook, {
     env,
     cwd: projectDir,
+    preservePath: false,
     input: Buffer.from('refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n'),
   });
   const calls = fs.existsSync(callsPath)
@@ -427,20 +429,32 @@ if (
     const { result, calls, overrideStubPath } = runHermeticPythonPrePush({ overrideStub: true });
     assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.deepStrictEqual(calls, [`${toBashPath(overrideStubPath)}|-q`], JSON.stringify(calls));
+    // The override is not verified to be pytest, so it must at least be loud.
+    assert.match(result.stdout, /via ECC_PYTEST_CMD/);
+    assert.match(result.stdout, /does\n?.*not check that it is pytest/s);
   })
 )
   passed++;
 else failed++;
 
-if (
-  test('pre-push fails closed when ECC_PYTEST_CMD is set to whitespace', () => {
-    const { result } = runHermeticPythonPrePush({ pytestCmd: '   ' });
-    assert.notStrictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    assert.match(result.stderr, /ECC_PYTEST_CMD is set but empty/);
-  })
-)
-  passed++;
-else failed++;
+// Both blank forms, because they used to disagree: an unquoted empty value fell
+// through to discovery while whitespace failed the push. A venv is present so a
+// fall-through would be visible as a pass rather than as an absence.
+for (const [label, blank] of [['empty', ''], ['whitespace', '   ']]) {
+  if (
+    test(`pre-push fails closed when ECC_PYTEST_CMD is set to ${label}`, () => {
+      const { result, calls } = runHermeticPythonPrePush({
+        venvName: 'venv-blank',
+        pytestCmd: blank,
+      });
+      assert.notStrictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.match(result.stderr, /ECC_PYTEST_CMD is set but names no command/);
+      assert.deepStrictEqual(calls, [], JSON.stringify(calls));
+    })
+  )
+    passed++;
+  else failed++;
+}
 
 if (
   test('pre-push rejects a PATH pytest that does not identify itself as pytest', () => {

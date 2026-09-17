@@ -148,7 +148,18 @@ is_pytest() {
 }
 
 resolve_pytest() {
-  if [[ -n "${ECC_PYTEST_CMD:-}" ]]; then
+  # `${VAR+set}` rather than `-n "${VAR:-}"`, so that a variable set to nothing is
+  # still an override: `ECC_PYTEST_CMD=` and `ECC_PYTEST_CMD="   "` now behave
+  # alike, where the first used to fall through to discovery and the second failed
+  # the push. Falling through is the wrong half of that pair -- an override that
+  # evaluated empty (a command substitution that found nothing, say) would silently
+  # run a different runner than the operator asked for, which is the substitution
+  # this resolver refuses to make anywhere else.
+  #
+  # Not `[[ -v ECC_PYTEST_CMD ]]`: that is bash 4.2, and a stock macOS `/bin/bash`
+  # is 3.2, where it is a syntax error rather than a false. This hook ships to
+  # whatever `env bash` finds.
+  if [[ -n "${ECC_PYTEST_CMD+set}" ]]; then
     # Taken as given. This is a deliberate override, and the hook cannot inspect it
     # without running it -- a wrapper script may ignore `--version` and run the
     # suite, so probing costs a duplicate test run and then blocks the push anyway.
@@ -157,7 +168,7 @@ resolve_pytest() {
     # guess. Word-split, so the command names something on PATH or an interpreter
     # whose path has no spaces; a venv with spaces is found by the loop below.
     read -r -a PYTEST_CMD <<<"$ECC_PYTEST_CMD" || true
-    [[ ${#PYTEST_CMD[@]} -gt 0 ]] || fail "ECC_PYTEST_CMD is set but empty"
+    [[ ${#PYTEST_CMD[@]} -gt 0 ]] || fail "ECC_PYTEST_CMD is set but names no command"
     return 0
   fi
   local venv
@@ -195,6 +206,14 @@ if [[ -f "pyproject.toml" || -f "requirements.txt" ]]; then
   if resolve_pytest; then
     ran_any_check=1
     log "Python project detected. Running: ${PYTEST_CMD[*]} -q"
+    if [[ -n "${ECC_PYTEST_CMD+set}" ]]; then
+      # resolve_pytest deliberately does not verify the override is pytest, because
+      # probing it can run the operator's suite. What this gate can honestly do
+      # about a stale override is refuse to be quiet about it: a bypass announced
+      # on every push is not the silent gate this resolver exists to prevent.
+      log "  via ECC_PYTEST_CMD -- the hook runs what you pointed it at, and does"
+      log "  not check that it is pytest. Unset it to gate on the real suite."
+    fi
     pytest_status=0
     "${PYTEST_CMD[@]}" -q || pytest_status=$?
     case "$pytest_status" in
