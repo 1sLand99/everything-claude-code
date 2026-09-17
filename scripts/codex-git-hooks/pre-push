@@ -117,54 +117,82 @@ if [[ -f "go.mod" ]] && command -v go >/dev/null 2>&1; then
   go test ./... || fail "go test failed"
 fi
 
-# Resolve how this project runs pytest.
+# Resolve how this project runs pytest, into PYTEST_CMD as an argv array.
 #
 # Looking only for `pytest` on PATH meant the hook skipped every project that keeps
 # its tools in a virtualenv -- which is most of them -- and reported "pytest is not
 # installed" while sitting next to a .venv with pytest in it. A gate that silently
 # declines to gate is worse than no gate, because the skip line reads like a pass.
 #
+# An array rather than one string, because a virtualenv path may contain spaces:
+# a scalar command splits `/home/me/my env/bin/python` into two paths that do not
+# exist, and the hook then rejects the push for a reason that has nothing to do
+# with the code being pushed.
+#
 # Echoes the command it will run, so the reason for a skip is always visible.
+PYTEST_CMD=()
+
+# Does this command actually run pytest? Accepting `--version` is not evidence --
+# plenty of programs take it and exit 0 -- so the output has to name pytest. The
+# version is captured rather than piped: under `set -o pipefail` a `| grep -q` can
+# report the SIGPIPE of the program it just matched.
+is_pytest() {
+  local version
+  version="$("$@" --version 2>&1)" || return 1
+  grep -qiE 'pytest[[:space:]]+(version[[:space:]]+)?[0-9]' <<<"$version"
+}
+
 resolve_pytest() {
   if [[ -n "${ECC_PYTEST_CMD:-}" ]]; then
-    echo "$ECC_PYTEST_CMD"
+    # Word-split, so the override names a command on PATH or an interpreter whose
+    # path has no spaces; a venv with spaces in its name is found by the loop below.
+    read -r -a PYTEST_CMD <<<"$ECC_PYTEST_CMD" || true
+    # Checked like every other candidate, and fatally rather than by falling
+    # through: an operator who set this asked for that command, and quietly running
+    # a different one would hide the misconfiguration. `ECC_PYTEST_CMD=true` would
+    # otherwise run `true -q`, pass, and report a Python project verified by
+    # nothing -- the same silent gate this resolver exists to remove.
+    if [[ ${#PYTEST_CMD[@]} -eq 0 ]] || ! is_pytest "${PYTEST_CMD[@]}"; then
+      fail "ECC_PYTEST_CMD is set to '$ECC_PYTEST_CMD', which does not run pytest"
+    fi
     return 0
   fi
   local venv
   for venv in "${VIRTUAL_ENV:-}" .venv venv env; do
     if [[ -n "$venv" && -x "$venv/bin/python" ]]; then
       if "$venv/bin/python" -c "import pytest" >/dev/null 2>&1; then
-        echo "$venv/bin/python -m pytest"
+        PYTEST_CMD=("$venv/bin/python" -m pytest)
         return 0
       fi
     fi
   done
   if [[ -f "uv.lock" ]] && command -v uv >/dev/null 2>&1; then
     if uv run --no-sync python -c "import pytest" >/dev/null 2>&1; then
-      echo "uv run --no-sync pytest"
+      PYTEST_CMD=(uv run --no-sync pytest)
       return 0
     fi
   fi
   if [[ -f "poetry.lock" ]] && command -v poetry >/dev/null 2>&1; then
     if poetry run python -c "import pytest" >/dev/null 2>&1; then
-      echo "poetry run pytest"
+      PYTEST_CMD=(poetry run pytest)
       return 0
     fi
   fi
-  if command -v pytest >/dev/null 2>&1; then
-    echo "pytest"
+  # `command -v` proves only that a file of that name exists on PATH, which is why
+  # this candidate is confirmed too before it is accepted.
+  if command -v pytest >/dev/null 2>&1 && is_pytest pytest; then
+    PYTEST_CMD=(pytest)
     return 0
   fi
+  PYTEST_CMD=()
   return 1
 }
 
 if [[ -f "pyproject.toml" || -f "requirements.txt" ]]; then
-  if pytest_cmd="$(resolve_pytest)"; then
+  if resolve_pytest; then
     ran_any_check=1
-    log "Python project detected. Running: $pytest_cmd -q"
-    # Unquoted on purpose: the resolver returns a command with arguments.
-    # shellcheck disable=SC2086
-    $pytest_cmd -q || fail "pytest failed"
+    log "Python project detected. Running: ${PYTEST_CMD[*]} -q"
+    "${PYTEST_CMD[@]}" -q || fail "pytest failed"
   else
     log "Python project detected but no pytest found (checked \$VIRTUAL_ENV, .venv,"
     log "  venv, env, uv, poetry, PATH). Set ECC_PYTEST_CMD to point at it."

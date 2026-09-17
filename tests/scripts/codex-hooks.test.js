@@ -306,6 +306,98 @@ if (
   passed++;
 else failed++;
 
+function writeExecutable(filePath, body) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, body);
+  fs.chmodSync(filePath, 0o755);
+}
+
+// The Python arm of the hook, exercised without a real interpreter: the stubs
+// record the argv they were handed, which is what the virtualenv-path regression
+// is actually about.
+function runHermeticPythonPrePush({
+  venvName = null,
+  pytestCmd = null,
+  overrideVersionLine = null,
+} = {}) {
+  const tempDir = createTempDir('codex-pre-push-py-');
+  const projectDir = path.join(tempDir, 'project');
+  const callsPath = path.join(tempDir, 'calls.txt');
+  fs.mkdirSync(projectDir);
+  fs.writeFileSync(path.join(projectDir, 'pyproject.toml'), '[project]\nname = "demo"\n');
+  const initialized = spawnSync('git', ['init', '--quiet'], { cwd: projectDir });
+  assert.strictEqual(initialized.status, 0, initialized.stderr?.toString());
+
+  const env = {
+    ECC_SKIP_GIT_HOOKS: '0',
+    ECC_SKIP_PREPUSH: '0',
+    MSYS_NO_PATHCONV: '1',
+  };
+
+  let venvPython = null;
+  if (venvName) {
+    venvPython = path.join(tempDir, venvName, 'bin', 'python');
+    writeExecutable(venvPython, `#!/bin/sh\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
+    env.VIRTUAL_ENV = toBashPath(path.join(tempDir, venvName));
+  }
+
+  if (overrideVersionLine !== null) {
+    const stub = path.join(tempDir, 'bin', 'fake-pytest');
+    writeExecutable(stub, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '%s\\n' '${overrideVersionLine}'; exit 0; fi\nprintf '%s\\n' "$0|$*" >> "${toBashPath(callsPath)}"\nexit 0\n`);
+    env.ECC_PYTEST_CMD = toBashPath(stub);
+  } else if (pytestCmd !== null) {
+    env.ECC_PYTEST_CMD = pytestCmd;
+  }
+
+  const result = runBash(prePushHook, {
+    env,
+    cwd: projectDir,
+    input: Buffer.from('refs/heads/main 1111111111111111111111111111111111111111 refs/heads/main 0000000000000000000000000000000000000000\n'),
+  });
+  const calls = fs.existsSync(callsPath)
+    ? fs.readFileSync(callsPath, 'utf8').trim().split(/\r?\n/).filter(Boolean)
+    : [];
+  cleanup(tempDir);
+  return { result, calls, venvPython };
+}
+
+if (
+  test('pre-push runs pytest from a virtualenv whose path contains spaces', () => {
+    const { result, calls, venvPython } = runHermeticPythonPrePush({ venvName: 'my venv' });
+    const python = toBashPath(venvPython);
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.deepStrictEqual(calls, [
+      `${python}|-c import pytest`,
+      `${python}|-m pytest -q`,
+    ], JSON.stringify({ calls, python, stdout: result.stdout, stderr: result.stderr }, null, 2));
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push rejects an ECC_PYTEST_CMD that does not run pytest', () => {
+    const { result, calls } = runHermeticPythonPrePush({ pytestCmd: 'true' });
+    assert.notStrictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stderr, /ECC_PYTEST_CMD is set to 'true', which does not run pytest/);
+    assert.deepStrictEqual(calls, []);
+    assert.doesNotMatch(result.stdout, /Verification checks passed/);
+  })
+)
+  passed++;
+else failed++;
+
+if (
+  test('pre-push runs an ECC_PYTEST_CMD override that identifies itself as pytest', () => {
+    const { result, calls } = runHermeticPythonPrePush({ overrideVersionLine: 'pytest 8.0.0' });
+    assert.strictEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.strictEqual(calls.length, 1, JSON.stringify(calls));
+    assert.match(calls[0], /\|-q$/);
+  })
+)
+  passed++;
+else failed++;
+
 if (
   test('check-plugin-cache fails when the installed cache is missing manifest-referenced files', () => {
     const homeDir = createTempDir('codex-plugin-cache-home-');
