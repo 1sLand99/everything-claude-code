@@ -593,6 +593,54 @@ function runTests() {
     }
   })) passed++; else failed++;
 
+  if (test('home installs do not copy the repo .agents staging directory into Claude or Codex homes', () => {
+    const homeDir = createTempDir('install-apply-home-');
+    const projectDir = createTempDir('install-apply-project-');
+
+    try {
+      const claudeResult = run(['--profile', 'core', '--enable-hooks'], { cwd: projectDir, homeDir });
+      assert.strictEqual(claudeResult.code, 0, claudeResult.stderr);
+
+      const claudeRoot = path.join(homeDir, '.claude');
+      assert.ok(fs.existsSync(path.join(claudeRoot, 'agents', 'architect.md')));
+      assert.ok(fs.existsSync(path.join(claudeRoot, 'skills', 'tdd-workflow', 'SKILL.md')));
+      assert.ok(
+        !fs.existsSync(path.join(claudeRoot, '.agents')),
+        'Claude home must not receive the repo .agents staging directory'
+      );
+
+      const claudeState = readJson(path.join(claudeRoot, 'ecc', 'install-state.json'));
+      assert.ok(
+        !claudeState.operations.some(operation => (
+          String(operation.sourceRelativePath || '').replace(/\\/g, '/').split('/')[0] === '.agents'
+        )),
+        'Claude install-state must not record .agents copy operations'
+      );
+
+      const codexResult = run(['--target', 'codex', '--profile', 'core'], { cwd: projectDir, homeDir });
+      assert.strictEqual(codexResult.code, 0, codexResult.stderr);
+
+      const codexRoot = path.join(homeDir, '.codex');
+      assert.ok(fs.existsSync(path.join(codexRoot, 'agents', 'architect.md')));
+      assert.ok(fs.existsSync(path.join(codexRoot, 'skills', 'tdd-workflow', 'SKILL.md')));
+      assert.ok(
+        !fs.existsSync(path.join(codexRoot, '.agents')),
+        'Codex home must not receive the repo .agents staging directory'
+      );
+
+      const codexState = readJson(path.join(codexRoot, 'ecc-install-state.json'));
+      assert.ok(
+        !codexState.operations.some(operation => (
+          String(operation.sourceRelativePath || '').replace(/\\/g, '/').split('/')[0] === '.agents'
+        )),
+        'Codex install-state must not record .agents copy operations'
+      );
+    } finally {
+      cleanup(homeDir);
+      cleanup(projectDir);
+    }
+  })) passed++; else failed++;
+
   if (test('preserves existing top-level Claude rules and skills during managed install', () => {
     const homeDir = createTempDir('install-apply-home-');
     const projectDir = createTempDir('install-apply-project-');
