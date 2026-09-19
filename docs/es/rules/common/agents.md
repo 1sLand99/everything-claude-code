@@ -3,7 +3,7 @@
 ## Agentes Disponibles
 
 Los agentes de ECC se distribuyen con el plugin `ecc@ecc`, no en `~/.claude/agents/`.
-Se invocan a través de la herramienta Agent con un `subagent_type` con scope del plugin:
+Se invocan a través de la herramienta Agent con un `subagent_type` con ámbito de plugin:
 
     Agent(subagent_type: "ecc:planner", prompt: "...")
 
@@ -20,6 +20,8 @@ Se invocan a través de la herramienta Agent con un `subagent_type` con scope de
 | ecc:doc-updater | Documentación | Actualización de docs |
 | ecc:rust-reviewer | Revisión de código Rust | Proyectos Rust |
 | ecc:harmonyos-app-resolver | Desarrollo de apps HarmonyOS | Proyectos HarmonyOS/ArkTS |
+
+Para el roster completo de 68 agentes, ver `/ecc:ecc-guide`.
 
 ## Uso Inmediato de Agentes
 

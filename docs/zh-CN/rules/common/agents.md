@@ -2,8 +2,8 @@
 
 ## 可用智能体
 
-ECC 智能体随 `ecc@ecc` 插件一起分发，而非位于 `~/.claude/agents/` 中。
-它们通过具有插件作用域 `subagent_type` 的 Agent 工具调用：
+ECC 智能体随 `ecc@ecc` 插件一起分发，不在 `~/.claude/agents/` 目录中。
+它们通过 Agent 工具以插件作用域的 `subagent_type` 调用：
 
     Agent(subagent_type: "ecc:planner", prompt: "...")
 
@@ -19,6 +19,8 @@ ECC 智能体随 `ecc@ecc` 插件一起分发，而非位于 `~/.claude/agents/`
 | ecc:refactor-cleaner | 清理死代码 | 代码维护 |
 | ecc:doc-updater | 文档 | 更新文档 |
 | ecc:rust-reviewer | Rust 代码审查 | Rust 项目 |
+
+完整 68 个智能体的清单参见 `/ecc:ecc-guide`。
 
 ## 即时智能体使用
 

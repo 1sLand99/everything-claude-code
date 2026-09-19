@@ -21,6 +21,8 @@ They are invoked through the Agent tool with a plugin-scoped `subagent_type`:
 | ecc:rust-reviewer | Rust code review | Rust projects |
 | ecc:harmonyos-app-resolver | HarmonyOS app development | HarmonyOS/ArkTS projects |
 
+For the full roster of 68 agents, see `/ecc:ecc-guide`.
+
 ## Immediate Agent Usage
 
 No user prompt needed:

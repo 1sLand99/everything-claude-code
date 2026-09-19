@@ -2,8 +2,8 @@
 
 ## Mevcut Agent'lar
 
-ECC agent'ları `ecc@ecc` eklentisi ile birlikte gelir, `~/.claude/agents/` içinde değildirler.
-Plugin kapsamı `subagent_type` ile Agent aracılığıyla çağrılır:
+ECC agent'ları `ecc@ecc` eklentisiyle birlikte gelir, `~/.claude/agents/` dizininde bulunmaz.
+Agent aracıyla eklenti kapsamlı bir `subagent_type` ile çağrılır:
 
     Agent(subagent_type: "ecc:planner", prompt: "...")
 
@@ -19,6 +19,8 @@ Plugin kapsamı `subagent_type` ile Agent aracılığıyla çağrılır:
 | ecc:refactor-cleaner | Ölü kod temizliği | Kod bakımı |
 | ecc:doc-updater | Dokümantasyon | Dokümanları güncelleme |
 | ecc:rust-reviewer | Rust kod incelemesi | Rust projeleri |
+
+68 agent'ın tam listesi için `/ecc:ecc-guide` bölümüne bakın.
 
 ## Anlık Agent Kullanımı
 

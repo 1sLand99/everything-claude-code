@@ -2,8 +2,8 @@
 
 ## 利用可能な Agent
 
-ECC エージェントは `ecc@ecc` プラグインに同梱されており、`~/.claude/agents/` にはありません。
-プラグインスコープの `subagent_type` を使用して Agent ツールから呼び出します:
+ECC の Agent は `ecc@ecc` プラグインに同梱されており、`~/.claude/agents/` には配置されません。
+Agent ツールではプラグインスコープの `subagent_type` で呼び出します:
 
     Agent(subagent_type: "ecc:planner", prompt: "...")
 
@@ -18,6 +18,8 @@ ECC エージェントは `ecc@ecc` プラグインに同梱されており、`~
 | ecc:e2e-runner | E2Eテスト | 重要なユーザーフロー |
 | ecc:refactor-cleaner | デッドコードクリーンアップ | コードメンテナンス |
 | ecc:doc-updater | ドキュメント | ドキュメント更新 |
+
+全 68 Agent の一覧は `/ecc:ecc-guide` を参照。
 
 ## Agent の即座の使用
 
