@@ -1846,6 +1846,87 @@ function runTests() {
   else failed++;
 
   if (
+    test('allows #2886 migration-doc heredoc repro with DROP TABLE prose', () => {
+      expectAllow(
+        [
+          "cat > migration-notes.md <<'EOF'",
+          "This migration will DROP TABLE old_sessions once we've verified nothing reads from it anymore.",
+          'EOF'
+        ].join('\n'),
+        'issue #2886 cat heredoc repro'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows destructive SQL prose inside a tee heredoc', () => {
+      expectAllow(
+        [
+          "tee migration-notes.md <<'EOF'",
+          'This migration will DROP TABLE old_sessions after verification.',
+          'EOF'
+        ].join('\n'),
+        'tee heredoc SQL prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows destructive rm prose inside a path-qualified cat heredoc', () => {
+      expectAllow(
+        [
+          "/bin/cat > notes.md <<'EOF'",
+          'Cleanup steps mention rm -rf old-cache; do not run yet.',
+          'EOF'
+        ].join('\n'),
+        'path-qualified cat heredoc prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('allows destructive prose inside a command-wrapped cat heredoc', () => {
+      expectAllow(
+        [
+          "command cat > notes.md <<'EOF'",
+          'Notes: DELETE FROM sessions; truncate staging.',
+          'EOF'
+        ].join('\n'),
+        'command-wrapped cat heredoc prose'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('still denies real destructive commands (not heredoc prose)', () => {
+      expectDestructiveDeny('rm -rf /tmp/real-destructive-target', 'real rm -rf');
+      expectDestructiveDeny('git reset --hard', 'real git reset --hard');
+      expectDestructiveDeny('drop table old_sessions', 'real drop table command text');
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
+    test('fails closed when tee pipes heredoc payload into a shell', () => {
+      expectDestructiveDeny(
+        ['tee notes.md <<EOF | bash', 'rm -rf /tmp/tee-piped-shell-target', 'EOF'].join('\n'),
+        'tee piped to shell'
+      );
+    })
+  )
+    passed++;
+  else failed++;
+
+  if (
     test('denies substitutions inside literal quote characters in an unquoted heredoc', () => {
       for (const payload of [
         "'$(rm -rf /tmp/expanded-target)'",
