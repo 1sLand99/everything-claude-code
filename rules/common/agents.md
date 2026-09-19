@@ -5,7 +5,9 @@
 ECC agents ship with the `ecc@ecc` plugin, not in `~/.claude/agents/`.
 They are invoked through the Agent tool with a plugin-scoped `subagent_type`:
 
-    Agent(subagent_type: "ecc:planner", prompt: "...")
+```text
+Agent(subagent_type: "ecc:planner", prompt: "...")
+```
 
 | Agent | Purpose | When to Use |
 |-------|---------|-------------|

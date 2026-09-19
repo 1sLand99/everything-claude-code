@@ -5,7 +5,9 @@
 Los agentes de ECC se distribuyen con el plugin `ecc@ecc`, no en `~/.claude/agents/`.
 Se invocan a través de la herramienta Agent con un `subagent_type` con ámbito de plugin:
 
-    Agent(subagent_type: "ecc:planner", prompt: "...")
+```text
+Agent(subagent_type: "ecc:planner", prompt: "...")
+```
 
 | Agente | Propósito | Cuándo Usar |
 |--------|-----------|-------------|
