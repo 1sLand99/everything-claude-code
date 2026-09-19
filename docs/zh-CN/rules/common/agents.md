@@ -5,7 +5,9 @@
 ECC 智能体随 `ecc@ecc` 插件一起分发，不在 `~/.claude/agents/` 目录中。
 它们通过 Agent 工具以插件作用域的 `subagent_type` 调用：
 
-    Agent(subagent_type: "ecc:planner", prompt: "...")
+```text
+Agent(subagent_type: "ecc:planner", prompt: "...")
+```
 
 | 代理 | 用途 | 使用时机 |
 |-------|---------|-------------|

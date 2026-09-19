@@ -5,7 +5,9 @@
 ECC の Agent は `ecc@ecc` プラグインに同梱されており、`~/.claude/agents/` には配置されません。
 Agent ツールではプラグインスコープの `subagent_type` で呼び出します:
 
-    Agent(subagent_type: "ecc:planner", prompt: "...")
+```text
+Agent(subagent_type: "ecc:planner", prompt: "...")
+```
 
 | Agent | 目的 | 使用タイミング |
 |-------|---------|-------------|

@@ -5,7 +5,9 @@
 ECC agent'ları `ecc@ecc` eklentisiyle birlikte gelir, `~/.claude/agents/` dizininde bulunmaz.
 Agent aracıyla eklenti kapsamlı bir `subagent_type` ile çağrılır:
 
-    Agent(subagent_type: "ecc:planner", prompt: "...")
+```text
+Agent(subagent_type: "ecc:planner", prompt: "...")
+```
 
 | Agent | Amaç | Ne Zaman Kullanılır |
 |-------|---------|-------------|
